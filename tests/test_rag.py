@@ -176,7 +176,7 @@ def test_reranking_reorders_candidates_and_preserves_dense_score(rag):
 def test_backend_scope_violation_fails_closed(rag, monkeypatch):
     rag.ingest('course', 'notes.txt', b'Apple facts.')
     hit = SimpleNamespace(id='x', score=1, payload={'course_id': 'other', 'ready': True})
-    monkeypatch.setattr(rag.client, 'query_points', lambda **kwargs: SimpleNamespace(points=[hit]))
+    monkeypatch.setattr(rag.client, 'query_batch_points', lambda **kwargs: [SimpleNamespace(points=[hit])])
     with pytest.raises(RuntimeError, match='out-of-scope'):
         rag.search('course', 'apple')
 
@@ -261,6 +261,89 @@ def test_model_revision_changes_collection_identity(settings):
     second = RagService(settings, client=client, embedder=Embedder()).collection
     assert first != second
     client.close()
+
+
+def test_search_many_batches_encoding_qdrant_and_reranking_with_course_isolation(rag, monkeypatch):
+    class Reranker:
+        def __init__(self):
+            self.calls = []
+
+        def predict(self, pairs, **kwargs):
+            self.calls.append(pairs)
+            return [10 if query.lower() in text.lower() else -10 for query, text in pairs]
+
+    a_apple = rag.ingest('a', 'apple.txt', b'Apple facts')
+    a_graph = rag.ingest('a', 'graph.txt', b'Graph facts')
+    b_banana = rag.ingest('b', 'banana.txt', b'Banana facts')
+    rag.ingest('b', 'private.txt', b'Apple facts belonging only to course b')
+    before = rag._embedder.calls
+    rag.settings.rag_min_score = -1
+    rag.settings.rag_rerank_enabled = True
+    rag._reranker = Reranker()
+    backend = rag.client.query_batch_points
+    calls = []
+
+    def traced(**kwargs):
+        calls.append(kwargs)
+        return backend(**kwargs)
+
+    monkeypatch.setattr(rag.client, 'query_batch_points', traced)
+    result = rag.search_many([('a', 'apple'), ('b', 'banana'), ('a', 'graph')])
+    assert [group[0]['document_id'] for group in result] == [
+        a_apple['document_id'],
+        b_banana['document_id'],
+        a_graph['document_id'],
+    ]
+    assert rag._embedder.calls == before + 1
+    assert len(calls) == 1 and len(calls[0]['requests']) == 3
+    assert len(rag._reranker.calls) == 1
+    assert [pair[0] for pair in rag._reranker.calls[0]] == [
+        'apple',
+        'apple',
+        'banana',
+        'banana',
+        'graph',
+        'graph',
+    ]
+    assert all(hit['document_id'] in {a_apple['document_id'], a_graph['document_id']} for hit in result[0])
+
+
+def test_search_many_budgets_each_query_independently_and_preserves_empty_results(rag):
+    rag.ingest('a', 'notes.txt', ('apple ' * 100).encode())
+    rag.ingest('b', 'notes.txt', ('banana ' * 100).encode())
+    rag.settings.rag_context_tokens = 80
+    result = rag.search_many([('a', 'apple'), ('empty', 'apple'), ('b', 'banana')])
+    assert len(result) == 3 and result[1] == []
+    assert result[0] and result[2]
+    tokenizer = rag._embedder.tokenizer
+    for group in result:
+        cost = sum(48 + len(tokenizer.encode(h['title'])) + len(tokenizer.encode(h['text'])) for h in group)
+        assert cost <= 80
+
+
+def test_search_many_rejects_misaligned_backend_results(rag, monkeypatch):
+    rag.ingest('a', 'notes.txt', b'Apple facts')
+    monkeypatch.setattr(rag.client, 'query_batch_points', lambda **kwargs: [])
+    with pytest.raises(RuntimeError, match='invalid batch size'):
+        rag.search_many([('a', 'apple'), ('a', 'graph')])
+
+
+def test_search_many_rejects_cross_course_swapped_responses(rag, monkeypatch):
+    rag.ingest('a', 'notes.txt', b'Apple facts')
+    rag.ingest('b', 'notes.txt', b'Banana facts')
+    original = rag.client.query_batch_points
+    monkeypatch.setattr(rag.client, 'query_batch_points', lambda **kwargs: list(reversed(original(**kwargs))))
+    with pytest.raises(RuntimeError, match='out-of-scope'):
+        rag.search_many([('a', 'apple'), ('b', 'banana')])
+
+
+def test_search_many_empty_absent_collection_and_validation(rag):
+    assert rag.search_many([]) == []
+    assert rag.search_many([('a', 'apple'), ('b', 'banana')]) == [[], []]
+    with pytest.raises(RagValidationError):
+        rag.search_many([('a', 'apple'), ('../b', 'banana')])
+    with pytest.raises(RagValidationError):
+        rag.search_many([('a', 'apple'), ('b', ' ')])
 
 
 def test_invalid_scope_query_and_document_ids_rejected(rag):

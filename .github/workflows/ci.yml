@@ -40,3 +40,4 @@ jobs:
         with:
           persist-credentials: false
       - run: docker build --tag ai-teacher:ci .
+      - run: docker build -f deploy/health.Dockerfile --tag ai-teacher-fleet-health:ci .

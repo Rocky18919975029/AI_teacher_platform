@@ -15,5 +15,9 @@ backups/
 *.sqlite*
 *.log
 evaluation-results*.json
+private-users*.json
+load-results*.json
+deploy/generated/
+deploy/nodes.local.json
 dist/
 build/

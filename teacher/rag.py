@@ -315,39 +315,71 @@ class RagService:
             }
 
     def search(self, course_id: str, query: str) -> list[dict]:
-        query_filter = self._filter(course_id)
-        query = query.strip()
-        if not query or len(query) > 12000:
-            raise RagValidationError('Query must contain between 1 and 12000 characters')
-        if not self.client.collection_exists(self.collection):
+        return self.search_many([(course_id, query)])[0]
+
+    def search_many(self, requests: list[tuple[str, str]]) -> list[list[dict]]:
+        """Batch model/transport work while preserving a filter and budget per query.
+
+        Results correspond positionally to requests. A backend protocol/scope error
+        fails the whole batch; no partial or differently scoped data is returned.
+        """
+        if not requests:
             return []
-        vector = self._encode([query], query=True)[0]
-        hits = self.client.query_points(
+        if len(requests) > 128:
+            raise RagValidationError('Retrieval batch exceeds 128 requests')
+        filters, queries = [], []
+        for course_id, query in requests:
+            filters.append(self._filter(course_id))
+            query = query.strip()
+            if not query or len(query) > 12000:
+                raise RagValidationError('Query must contain between 1 and 12000 characters')
+            queries.append(query)
+        if not self.client.collection_exists(self.collection):
+            return [[] for _ in requests]
+        vectors = self._encode(queries, query=True)
+        responses = self.client.query_batch_points(
             collection_name=self.collection,
-            query=vector,
-            query_filter=query_filter,
-            limit=self.settings.rag_retrieve_k,
-            with_payload=True,
-            score_threshold=self.settings.rag_min_score,
-        ).points
-        candidates = []
-        for hit in hits:
-            p = hit.payload or {}
-            # Defense in depth for unexpected backend/filter behavior.
-            if p.get('course_id') != course_id or p.get('ready') is not True:
-                raise RuntimeError('Vector backend returned an out-of-scope document')
-            candidates.append(
-                {
-                    'id': str(hit.id),
-                    'document_id': p['document_id'],
-                    'title': p['title'],
-                    'page': p.get('page'),
-                    'text': p['text'],
-                    'score': float(hit.score),
-                    'retrieval_score': float(hit.score),
-                }
-            )
-        if candidates and self.settings.rag_rerank_enabled:
+            requests=[
+                self._models.QueryRequest(
+                    query=vector,
+                    filter=query_filter,
+                    limit=self.settings.rag_retrieve_k,
+                    with_payload=True,
+                    score_threshold=self.settings.rag_min_score,
+                )
+                for vector, query_filter in zip(vectors, filters)
+            ],
+        )
+        if len(responses) != len(requests):
+            raise RuntimeError('Vector backend returned an invalid batch size')
+        groups = []
+        for (course_id, _), response in zip(requests, responses):
+            candidates = []
+            for hit in response.points:
+                p = hit.payload or {}
+                # Defense in depth: never trust positional batching without scope checks.
+                if p.get('course_id') != course_id or p.get('ready') is not True:
+                    raise RuntimeError('Vector backend returned an out-of-scope document')
+                if not math.isfinite(float(hit.score)):
+                    raise RuntimeError('Vector backend returned an invalid score')
+                candidates.append(
+                    {
+                        'id': str(hit.id),
+                        'document_id': p['document_id'],
+                        'title': p['title'],
+                        'page': p.get('page'),
+                        'text': p['text'],
+                        'score': float(hit.score),
+                        'retrieval_score': float(hit.score),
+                    }
+                )
+            groups.append(candidates)
+        pairs = [
+            (query, candidate['text'])
+            for query, candidates in zip(queries, groups)
+            for candidate in candidates
+        ]
+        if pairs and self.settings.rag_rerank_enabled:
             with self._model_lock:
                 if self._reranker is None:
                     from sentence_transformers import CrossEncoder
@@ -360,17 +392,18 @@ class RagService:
                         max_length=512,
                     )
                 scores = self._reranker.predict(
-                    [(query, c['text']) for c in candidates],
+                    pairs,
                     batch_size=self.settings.rag_batch_size,
                     show_progress_bar=False,
                 )
-            if len(scores) != len(candidates) or any(not math.isfinite(float(score)) for score in scores):
+            if len(scores) != len(pairs) or any(not math.isfinite(float(score)) for score in scores):
                 raise RuntimeError('Reranker returned invalid scores')
-            for candidate, score in zip(candidates, scores):
+            for candidate, score in zip((c for group in groups for c in group), scores):
                 candidate['score'] = float(score)
-            candidates.sort(key=lambda item: item['score'], reverse=True)
+            for candidates in groups:
+                candidates.sort(key=lambda item: item['score'], reverse=True)
         with self._model_lock:
-            return self._budget_context(candidates)
+            return [self._budget_context(candidates) for candidates in groups]
 
     def _budget_context(self, candidates: list[dict]) -> list[dict]:
         tokenizer = self._load_embedder().tokenizer

@@ -86,3 +86,8 @@ or foreign resource; 409: session conflict; 413: too much input; 415: unsupporte
 type; 422: invalid request; 429: rate cap; 503: saturation/dependency failure.
 Honor `Retry-After` and use bounded backoff. Preserve `X-Request-ID` for support,
 without logging prompts or credentials.
+
+The default combined chat/search admission limit is 40. Work beyond the cap receives
+503; this is separate from each identity's request-per-minute limit. Retrieval
+microbatches across requests without combining course scopes. Optional speech has
+its own two-job cap and may return a text-only completion with a warning when busy.

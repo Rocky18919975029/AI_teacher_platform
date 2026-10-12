@@ -5,7 +5,9 @@ traceable source passages and optional Piper speech synthesis. The original
 Qwen/vLLM + FastAPI classroom prototype now includes persistent course retrieval,
 access boundaries and operational controls.
 
-This is a **single-node deployment baseline**. It does not claim high availability,
+The application uses **one central API process**, with an optional deployment
+bundle for **40 independent RTX 4090 inference hosts**. Its default admission cap
+is 40 combined active chats/searches. It does not claim high availability,
 security certification or measured production-scale capacity. GPU inference,
 real-course retrieval quality and deployment load still need to pass the
 [acceptance checklist](docs/operations.md#release-acceptance) on your host.
@@ -20,6 +22,9 @@ real-course retrieval quality and deployment load still need to pass the
   citation IDs produce warnings. Empty retrieval returns insufficient evidence.
 - **Inference:** asynchronous OpenAI-compatible vLLM requests and real SSE token
   streaming, response timeouts, bounded simultaneous chats and session serialization.
+- **Classroom concurrency:** retrieval microbatches up to eight questions with an
+  8 ms collection window, a dedicated bounded worker, course-isolated vector
+  queries, and a separately bounded two-job optional speech stage.
 - **State:** SQLite WAL sessions scoped to user and course, a durable upload queue
   with bounded retries, idempotent document versions and source deletion.
 - **Access and operations:** scoped instructor/student keys, rate limits,
@@ -37,7 +42,7 @@ No model tool execution or autonomous external actions are enabled.
 | Layer | Implementation |
 | --- | --- |
 | Serving | Python 3.12, FastAPI, Pydantic Settings, Uvicorn, HTTPX, SSE |
-| Inference | External vLLM service; default Qwen2.5-7B-Instruct |
+| Inference | Qwen2.5-7B-Instruct/vLLM; optional 40 replicas behind Nginx least-connections routing |
 | Retrieval | Sentence Transformers, BGE embeddings, CrossEncoder, Qdrant |
 | Documents | pypdf, python-docx; text-based PDFs, no built-in OCR |
 | Persistence | SQLite WAL and Qdrant persistent storage |
@@ -90,6 +95,11 @@ Compose starts the API and authenticated Qdrant. Qdrant has no published port; t
 API binds to loopback. Put a TLS reverse proxy in front for remote users. Data and
 model caches use named volumes. One API worker is required by local job coordination
 and process-local rate/admission limits. See [operations](docs/operations.md).
+
+For the 40-machine deployment, use the [cluster runbook](docs/cluster40.md),
+`deploy/compose.inference-node.yaml` on each GPU host and the generated central
+gateway configuration. It includes fleet-wide health probing and a load-test
+procedure; no GPU deployment is performed by generating configuration.
 
 ## Upload and evaluate
 

@@ -40,9 +40,12 @@ def build_messages(prompt, history, sources, max_history_chars):
 class Inference:
     def __init__(self, settings):
         self.settings = settings
+        self.tts_capacity = asyncio.Semaphore(settings.max_concurrent_tts)
+        # One streaming connection per admitted chat, with headroom for probes.
+        pool_size = settings.max_concurrent_chats + 8
         self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(settings.llm_timeout, connect=5),
-            limits=httpx.Limits(max_connections=32),
+            timeout=httpx.Timeout(settings.llm_timeout, connect=5, pool=5),
+            limits=httpx.Limits(max_connections=pool_size, max_keepalive_connections=pool_size),
             trust_env=False,
         )
 
@@ -94,6 +97,15 @@ class Inference:
         cfg = self.settings
         if not cfg.tts_enabled:
             return None
+        # A burst of 40 chats must not spawn 40 GPU-backed Piper processes.
+        await asyncio.wait_for(self.tts_capacity.acquire(), timeout=cfg.tts_queue_timeout)
+        try:
+            return await self._synthesize(text, audio_dir)
+        finally:
+            self.tts_capacity.release()
+
+    async def _synthesize(self, text, audio_dir):
+        cfg = self.settings
         if not cfg.piper_model.is_file() or not cfg.piper_config.is_file():
             raise RuntimeError('TTS model unavailable')
         aid = uuid.uuid4().hex

@@ -14,5 +14,9 @@ models
 *.onnx
 *.sqlite*
 *.log
+private-users*.json
+load-results*.json
+deploy/generated
+deploy/nodes.local.json
 tests
 docs

@@ -27,7 +27,7 @@ services:
     pids_limit: 256
     mem_limit: 6g
     cpus: 4
-    stop_grace_period: 130s
+    stop_grace_period: 270s
 
   qdrant:
     image: qdrant/qdrant:v1.19.2

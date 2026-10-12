@@ -3,7 +3,7 @@
 ## Supported topology
 
 Run **one FastAPI/Uvicorn process**, persistent Qdrant and separately provisioned
-vLLM inference. SQLite WAL stores sessions/jobs/audio metadata at
+vLLM inference (one service or the [40-replica gateway](cluster40.md)). SQLite WAL stores sessions/jobs/audio metadata at
 `DATA_DIR/teacher.sqlite3`; uploads/audio share that data directory. Qdrant stores
 passage text, embeddings and document metadata. This release is not an HA cluster.
 
@@ -53,6 +53,20 @@ system prompt, question, history, retrieval and output must fit the LLM context
 window. Retrieval token counts use the embedding tokenizer, not necessarily the
 generation tokenizer, so budget conservatively.
 
+Default `MAX_CONCURRENT_CHATS=40` is the combined active chat/search admission cap.
+The upstream connection pool scales with that cap. Retrieval uses
+`RETRIEVAL_BATCH_SIZE=8`, `RETRIEVAL_BATCH_WAIT_MS=8` and `RETRIEVAL_TIMEOUT=60` with
+a bounded dedicated worker, not the generic web thread pool. Query embeddings and
+reranker pairs batch together while Qdrant filters and contexts remain per course.
+Cancelled native model calls retain their capacity until the work actually returns.
+Configured admission and simulated capacity are not measurements of GPU throughput.
+
+The default container gives Uvicorn 240 seconds for graceful request drain and
+Compose 270 seconds before termination. Retrieval (60 s), inference (90 s) and
+optional speech (2 s queue plus 45 s execution) can add up. Increase both drain
+windows for larger timeouts or long ingestion/model initialization; native parsing
+or model calls cannot necessarily be preempted. Stop new work before maintenance.
+
 ## Documents and trust
 
 Only instructors upload/delete materials. PDF/DOCX parsers have byte, character,
@@ -83,6 +97,10 @@ One configured voice model is used. The legacy `voice` request field does not
 switch models. Confirm Piper and voice-model licenses before distribution. Text
 survives TTS failure; audio requires authentication and expires after the configured
 TTL. Monitor disk use even with expiry configured.
+
+`MAX_CONCURRENT_TTS=2` independently caps synthesis. After `TTS_QUEUE_TIMEOUT=2`
+seconds of queueing, a saturated speech stage returns text with a warning. A
+40-user text/RAG target does not promise 40 simultaneous audio syntheses.
 
 ## Monitoring and retention
 

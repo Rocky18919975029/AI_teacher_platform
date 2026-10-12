@@ -23,4 +23,4 @@ EXPOSE 9000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health/live', timeout=3)"
 # One worker is intentional: SQLite job recovery and in-memory admission limits are process-local.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1", "--no-access-log", "--timeout-graceful-shutdown", "120"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--workers", "1", "--no-access-log", "--timeout-graceful-shutdown", "240"]

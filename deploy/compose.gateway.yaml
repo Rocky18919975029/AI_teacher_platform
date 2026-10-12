@@ -1,0 +1,38 @@
+services:
+  gateway:
+    image: nginx:1.30.5-alpine
+    entrypoint: [nginx, -g, "daemon off;"]
+    user: "101:101"
+    restart: unless-stopped
+    stop_grace_period: 240s
+    volumes:
+      - ./generated/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - target: 8080
+        published: "${GATEWAY_PORT:-8001}"
+        host_ip: "${GATEWAY_BIND_HOST:-127.0.0.1}"
+        protocol: tcp
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 2
+    depends_on: [fleet-health]
+
+  fleet-health:
+    build:
+      context: ..
+      dockerfile: deploy/health.Dockerfile
+    restart: unless-stopped
+    environment:
+      VLLM_API_KEY: ${VLLM_API_KEY:?Supply the same non-placeholder key used by every vLLM node}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+    volumes:
+      - ./generated/nodes.json:/config/nodes.json:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 1
+    # Only gateway can read readiness through the Compose network; no published port.

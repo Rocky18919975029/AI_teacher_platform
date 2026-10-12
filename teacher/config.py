@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     llm_timeout: float = Field(default=90, ge=1, le=600)
     max_output_tokens: int = Field(default=1024, ge=1, le=4096)
     max_history_chars: int = Field(default=12000, ge=1000, le=60000)
-    max_concurrent_chats: int = Field(default=4, ge=1, le=64)
+    max_concurrent_chats: int = Field(default=40, ge=1, le=256)
+    retrieval_batch_size: int = Field(default=8, ge=1, le=64)
+    retrieval_batch_wait_ms: int = Field(default=8, ge=0, le=100)
+    retrieval_timeout: float = Field(default=60, ge=1, le=300)
     requests_per_minute: int = Field(default=60, ge=1)
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1024, le=50 * 1024 * 1024)
     max_pending_jobs: int = Field(default=50, ge=1, le=1000)
@@ -52,6 +55,8 @@ class Settings(BaseSettings):
     piper_config: Path = Path('models/piper/en_US-libritts-high.onnx.json')
     piper_cuda: bool = True
     tts_timeout: float = Field(default=45, ge=1, le=120)
+    max_concurrent_tts: int = Field(default=2, ge=1, le=16)
+    tts_queue_timeout: float = Field(default=2, ge=0.01, le=30)
     audio_ttl_seconds: int = Field(default=3600, ge=60)
 
     @model_validator(mode='after')

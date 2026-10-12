@@ -15,12 +15,13 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from teacher.config import Settings
 from teacher.inference import Inference, build_messages
+from teacher.retrieval import RetrievalOverloaded, RetrievalScheduler, RetrievalTimedOut
 from teacher.storage import Store
 
 LOG = logging.getLogger('teacher')
@@ -74,6 +75,22 @@ def create_app(settings=None, rag=None, inference=None):
     )
     chat_duration = Histogram('teacher_chat_duration_seconds', 'Complete chat latency', registry=registry)
     failures = Counter('teacher_failures_total', 'Dependency failures', ['component'], registry=registry)
+    active_requests = Gauge('teacher_active_requests', 'Admitted chat and search requests', registry=registry)
+    retrieval_pending = Gauge(
+        'teacher_retrieval_outstanding', 'Queued and running retrieval requests', registry=registry
+    )
+    retrieval_duration = Histogram(
+        'teacher_retrieval_duration_seconds', 'Retrieval including batch queue wait', registry=registry
+    )
+    first_token = Histogram(
+        'teacher_time_to_first_token_seconds',
+        'First model text token including retrieval',
+        buckets=(0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 60, 120),
+        registry=registry,
+    )
+    overloads = Counter(
+        'teacher_overload_total', 'Rejected requests at admission', ['stage'], registry=registry
+    )
 
     @asynccontextmanager
     async def lifespan(app):
@@ -94,6 +111,15 @@ def create_app(settings=None, rag=None, inference=None):
         else:
             app.state.rag = rag
         app.state.inference = inference or Inference(cfg)
+        app.state.retrieval = RetrievalScheduler(
+            app.state.rag,
+            capacity=cfg.max_concurrent_chats,
+            batch_size=min(cfg.retrieval_batch_size, cfg.max_concurrent_chats),
+            wait_ms=cfg.retrieval_batch_wait_ms,
+            timeout=cfg.retrieval_timeout,
+        )
+        await app.state.retrieval.start()
+        retrieval_pending.set_function(lambda: app.state.retrieval.outstanding)
         app.state.capacity = asyncio.Semaphore(cfg.max_concurrent_chats)
         app.state.rate = defaultdict(deque)
         app.state.store.recover_jobs()
@@ -144,6 +170,7 @@ def create_app(settings=None, rag=None, inference=None):
             worker.cancel()
             with suppress(asyncio.CancelledError):
                 await worker
+            await app.state.retrieval.close()
             await app.state.inference.close()
             await run_in_threadpool(app.state.rag.close)
 
@@ -290,12 +317,14 @@ def create_app(settings=None, rag=None, inference=None):
             await asyncio.wait_for(app.state.capacity.acquire(), timeout=0.1)
         except TimeoutError:
             store.release_session(sid)
+            overloads.labels('admission').inc()
             raise HTTPException(
                 503, 'Chat capacity reached; retry shortly', headers={'Retry-After': '2'}
             ) from None
         except BaseException:
             store.release_session(sid)
             raise
+        active_requests.inc()
         return sid, session
 
     def release_chat(sid, session):
@@ -303,6 +332,14 @@ def create_app(settings=None, rag=None, inference=None):
             session['_released'] = True
             app.state.store.release_session(sid)
             app.state.capacity.release()
+            active_requests.dec()
+
+    async def retrieve(course_id, query):
+        started = time.monotonic()
+        try:
+            return await app.state.retrieval.search(course_id, query)
+        finally:
+            retrieval_duration.observe(time.monotonic() - started)
 
     async def events(req, user, sid, session):
         started = time.monotonic()
@@ -314,8 +351,16 @@ def create_app(settings=None, rag=None, inference=None):
             yield 'meta', {'session_id': sid}
             if req.rag:
                 try:
-                    sources = await run_in_threadpool(app.state.rag.search, req.course_id, req.prompt)
+                    sources = await retrieve(req.course_id, req.prompt)
                     sources = [dict(s, id=f'S{i}') for i, s in enumerate(sources, 1)]
+                except RetrievalTimedOut:
+                    failures.labels('retrieval_timeout').inc()
+                    yield 'error', {'message': 'Course retrieval timed out. Please retry.'}
+                    return
+                except RetrievalOverloaded:
+                    overloads.labels('retrieval').inc()
+                    yield 'error', {'message': 'Course retrieval is busy. Please retry shortly.'}
+                    return
                 except Exception:
                     failures.labels('retrieval').inc()
                     yield 'error', {'message': 'Course retrieval is unavailable; please retry.'}
@@ -330,6 +375,8 @@ def create_app(settings=None, rag=None, inference=None):
                 async with asyncio.timeout(cfg.llm_timeout):
                     async with aclosing(app.state.inference.stream(messages)) as tokens:
                         async for token in tokens:
+                            if not answer and token:
+                                first_token.observe(time.monotonic() - started)
                             answer += token
                             if len(answer) > 32000:
                                 raise ValueError('Response too long')
@@ -489,14 +536,24 @@ def create_app(settings=None, rag=None, inference=None):
         try:
             await asyncio.wait_for(app.state.capacity.acquire(), timeout=0.1)
         except TimeoutError:
+            overloads.labels('admission').inc()
             raise HTTPException(503, 'Retrieval capacity reached', headers={'Retry-After': '2'}) from None
+        active_requests.inc()
         try:
-            sources = await run_in_threadpool(app.state.rag.search, req.course_id, req.query)
+            sources = await retrieve(req.course_id, req.query)
             return {'sources': sources}
+        except RetrievalTimedOut:
+            raise HTTPException(504, 'Retrieval timed out') from None
+        except RetrievalOverloaded:
+            overloads.labels('retrieval').inc()
+            raise HTTPException(503, 'Retrieval is busy', headers={'Retry-After': '2'}) from None
+        except ValueError:
+            raise HTTPException(422, 'Invalid retrieval query') from None
         except Exception:
             raise HTTPException(503, 'Retrieval unavailable') from None
         finally:
             app.state.capacity.release()
+            active_requests.dec()
 
     @app.delete('/api/documents/{document_id}')
     async def delete_document(
