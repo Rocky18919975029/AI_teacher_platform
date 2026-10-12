@@ -1,0 +1,53 @@
+services:
+  teacher:
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      HF_HOME: /app/model-cache
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?Set a Qdrant API key in .env}
+      VLLM_URL: ${VLLM_URL:?Set the full reachable vLLM chat-completions URL in .env}
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - teacher-data:/app/data
+      - model-cache:/app/model-cache
+    networks: [application, storage]
+    depends_on:
+      qdrant:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: 6g
+    cpus: 4
+    stop_grace_period: 130s
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.2
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set a Qdrant API key in .env}
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks: [storage]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 2g
+    cpus: 2
+    # No published port: only the application can reach the database.
+
+networks:
+  application: {}
+  storage:
+    internal: true
+
+volumes:
+  teacher-data: {}
+  model-cache: {}
+  qdrant-data: {}

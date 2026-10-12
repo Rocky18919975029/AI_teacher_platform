@@ -1,0 +1,51 @@
+[project]
+name = "ai-teacher-platform"
+version = "2.0.0"
+description = "Course-grounded local AI teaching with streaming responses and scoped access"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "fastapi>=0.115.12,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.8,<3",
+  "python-multipart>=0.0.20,<1",
+  "prometheus-client>=0.21,<1",
+  "qdrant-client>=1.14,<2",
+  "pypdf>=5.4,<7",
+  "python-docx>=1.1,<2",
+]
+
+[project.optional-dependencies]
+rag = ["sentence-transformers>=4,<6", "torch>=2.6,<3"]
+tts = ["piper-tts>=1.3,<2"]
+
+[dependency-groups]
+dev = ["pytest>=8.3,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1", "pip-audit>=2.8,<3"]
+
+[tool.uv]
+package = false
+
+# CPU embeddings keep the API image separate from the GPU vLLM serving stack.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["integration: requires explicitly configured external services"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "single"

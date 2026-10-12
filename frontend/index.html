@@ -1,410 +1,80 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>AI Teacher</title>
-
-  <script src="https://unpkg.com/wavesurfer.js"></script>
-
-  <style>
-    body {
-      margin: 0;
-      background: #f7f8fa;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      display: flex;
-      justify-content: center;
-    }
-
-    #app {
-      width: 100%;
-      max-width: 780px;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      background: white;
-      border-left: 1px solid #e3e3e3;
-      border-right: 1px solid #e3e3e3;
-    }
-
-    #header {
-      padding: 12px 16px;
-      background: #007bff;
-      color: white;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    #header-title {
-      font-size: 20px;
-      font-weight: 600;
-    }
-
-    #header-controls {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    #voice-select,
-    #theme-toggle,
-    #clear-btn {
-      border: none;
-      border-radius: 8px;
-      padding: 6px 10px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-
-    #clear-btn {
-      background: #ff7675;
-      color: white;
-    }
-
-    #theme-toggle {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      font-size: 18px;
-      background: rgba(255,255,255,0.2);
-      color: white;
-    }
-
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-    }
-
-    .bubble {
-      padding: 12px 16px;
-      margin-bottom: 16px;
-      max-width: 75%;
-      border-radius: 18px;
-      line-height: 1.5;
-    }
-
-    .user {
-      margin-left: auto;
-      background: #d8ecff;
-      border-bottom-right-radius: 6px;
-    }
-
-    .bot {
-      margin-right: auto;
-      background: #f0f0f0;
-      border-bottom-left-radius: 6px;
-    }
-
-    .bubble-text {
-      white-space: pre-wrap;
-      margin-bottom: 8px;
-      font-size: 16px;
-    }
-
-    .audio-player {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .control-btn {
-      margin-top: 6px;
-      padding: 4px 10px;
-      border: none;
-      border-radius: 8px;
-      background: #007bff;
-      color: white;
-      cursor: pointer;
-      width: 110px;
-      font-size: 13px;
-    }
-
-    #typing {
-      display: none;
-      margin-left: 20px;
-      margin-bottom: 16px;
-      background: #f0f0f0;
-      padding: 10px 16px;
-      border-radius: 18px;
-      opacity: 0.8;
-      font-style: italic;
-    }
-
-    #input-area {
-      display: flex;
-      padding: 12px;
-      border-top: 1px solid #ddd;
-      background: #fafafa;
-    }
-
-    #prompt {
-      flex: 1;
-      border: 1px solid #ccc;
-      border-radius: 10px;
-      padding: 10px;
-      font-size: 16px;
-      height: 45px;
-      resize: none;
-    }
-
-    #send-btn {
-      margin-left: 12px;
-      padding: 0 20px;
-      background: #007bff;
-      border: none;
-      color: white;
-      border-radius: 10px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-
-    /* ========== Dark Mode Styles ========== */
-    body.dark {
-      background: #020617;
-    }
-
-    body.dark #app {
-      background: #020617;
-      color: #e5e7eb;
-      border-color: #1f2937;
-    }
-
-    body.dark #header {
-      background: #0f172a;
-    }
-
-    body.dark #messages {
-      background: #020617;
-    }
-
-    body.dark .user {
-      background: #1d4ed8;
-      color: #e5e7eb;
-    }
-
-    body.dark .bot {
-      background: #111827;
-      border: 1px solid #374151;
-      color: #e5e7eb;
-    }
-
-    body.dark #typing {
-      background: #111827;
-      border-color: #374151;
-      color: #e5e7eb;
-    }
-
-    body.dark #input-area {
-      background: #020617;
-      border-color: #111827;
-    }
-
-    body.dark #prompt {
-      background: #020617;
-      color: #e5e7eb;
-      border-color: #374151;
-    }
-
-    body.dark #clear-btn {
-      background: #b91c1c;
-    }
-
-    body.dark #voice-select {
-      background: #111827;
-      color: #e5e7eb;
-    }
-
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="A course-grounded AI teaching assistant for the Metaverse Classroom.">
+  <title>AI Teacher · Metaverse Classroom</title>
+  <link rel="stylesheet" href="./app.css">
+  <script src="./app.js" defer></script>
 </head>
-
 <body>
+  <a class="skip-link" href="#prompt">Skip to conversation</a>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Classroom workspace">
+      <a class="brand" href="/ui/" aria-label="AI Teacher home"><span class="brand-mark" aria-hidden="true">a<span>i</span></span><span>AI Teacher<small>METAVERSE CLASSROOM</small></span></a>
+      <div class="sidebar-heading"><span>YOUR WORKSPACE</span><button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark theme" title="Switch theme">◐</button></div>
+      <form id="connection-form" class="connection-form">
+        <label for="course-id">Course</label>
+        <input id="course-id" name="course" value="default" maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]{0,63}" autocomplete="off" spellcheck="false" required>
+        <label for="api-token">Access token</label>
+        <input id="api-token" type="password" minlength="32" autocomplete="off" spellcheck="false" placeholder="Paste your classroom token" required>
+        <p class="field-note">Kept in this tab's memory only.</p>
+        <button id="connect-btn" class="button secondary" type="submit">Connect to classroom</button>
+        <p id="connection-status" class="connection-status" role="status">Not connected</p>
+      </form>
 
-<div id="app">
+      <div class="section-label"><h2>Conversations</h2><button id="refresh-sessions" class="text-button" type="button" aria-label="Refresh conversations">Refresh</button></div>
+      <button id="new-chat" class="button new-chat" type="button"><span aria-hidden="true">＋</span> New conversation</button>
+      <nav id="session-list" class="session-list" aria-label="Saved conversations"><p class="empty-list">Connect to see your conversations.</p></nav>
 
-  <div id="header">
-    <div id="header-title">AI Teacher</div>
+      <details id="knowledge-panel" class="knowledge-panel">
+        <summary>Course knowledge <span class="admin-badge">ADMIN</span></summary>
+        <p class="field-note">Add reference material for grounded answers. Document management requires an administrator token.</p>
+        <form id="upload-form">
+          <label for="document-file">Upload PDF, DOCX, TXT or Markdown</label>
+          <input id="document-file" type="file" accept=".pdf,.docx,.txt,.md" required>
+          <button id="upload-btn" class="button secondary" type="submit">Upload &amp; index</button>
+        </form>
+        <p id="upload-status" class="field-note" role="status"></p>
+        <ul id="job-list" class="job-list" aria-label="Indexing jobs" aria-live="polite"></ul>
+        <button id="refresh-documents" class="text-button" type="button">Refresh documents</button>
+        <ul id="document-list" class="document-list" aria-label="Course documents"></ul>
+      </details>
+      <div class="sidebar-footer"><span class="live-dot" aria-hidden="true"></span> Your course. Your learning pace.</div>
+    </aside>
 
-    <div id="header-controls">
-      <select id="voice-select">
-        <option value="teacher_female">Female Teacher</option>
-        <option value="teacher_male">Male Teacher</option>
-      </select>
-
-      <button id="clear-btn">Clear</button>
-      <button id="theme-toggle">🌙</button>
-    </div>
+    <main class="main">
+      <header class="topbar"><div><span class="eyebrow">LEARNING STUDIO</span><h1 id="conversation-title">Classroom assistant</h1></div><div id="grounding-badge" class="grounded-badge"><span aria-hidden="true">✧</span> Course-grounded</div></header>
+      <div id="notice" class="notice" role="alert" hidden></div>
+      <section id="messages" class="messages" role="log" aria-label="Conversation" aria-live="off">
+        <div id="welcome" class="welcome">
+          <div class="welcome-symbol" aria-hidden="true">✧</div>
+          <p class="eyebrow">A LITTLE CURIOSITY GOES A LONG WAY</p>
+          <h2>Make room for<br><em>understanding.</em></h2>
+          <p class="welcome-description">Explore your course, work through a difficult idea, or hear an explanation. Start with a question.</p>
+          <div class="suggestions">
+            <button class="suggestion" type="button" data-prompt="Explain the key concepts in my course materials, with citations."><span class="suggestion-icon" aria-hidden="true">↗</span><strong>See the big picture</strong><span>Connect concepts in the course materials</span></button>
+            <button class="suggestion" type="button" data-prompt="Help me understand a difficult concept from my course. Ask me which topic I am studying first."><span class="suggestion-icon" aria-hidden="true">⌘</span><strong>Work through an idea</strong><span>Build understanding step by step</span></button>
+            <button class="suggestion" type="button" data-prompt="Quiz me on my course materials, one question at a time, and cite the relevant sources in your feedback."><span class="suggestion-icon" aria-hidden="true">◇</span><strong>Check what you know</strong><span>Practice with a question at a time</span></button>
+          </div>
+        </div>
+      </section>
+      <div class="composer-area">
+        <div id="stream-status" class="stream-status" role="status" aria-live="polite"></div>
+        <form id="chat-form" class="composer">
+          <label class="sr-only" for="prompt">Ask your classroom assistant</label>
+          <textarea id="prompt" name="prompt" rows="2" maxlength="8000" placeholder="What would you like to understand?" required></textarea>
+          <div class="composer-toolbar">
+            <div class="voice-controls"><label class="audio-toggle" title="Use indexed course documents. Turn off for general questions."><input id="with-rag" type="checkbox" checked> Course grounding</label><label class="audio-toggle"><input id="with-audio" type="checkbox"> Read aloud</label><label class="sr-only" for="voice-select">Assistant voice</label><select id="voice-select" aria-label="Assistant voice" disabled hidden><option value="teacher_female">Classroom voice</option></select></div>
+            <button id="stop-btn" class="button stop-button" type="button" hidden>Stop</button>
+            <button id="send-btn" class="button send-button" type="submit">Send <span aria-hidden="true">↑</span></button>
+          </div>
+        </form>
+        <p class="composer-note">Answers may contain mistakes. Check the cited course material. <span>Shift + Enter for a new line.</span></p>
+      </div>
+    </main>
   </div>
-
-  <div id="messages"></div>
-  <div id="typing">AI Teacher is thinking…</div>
-
-  <div id="input-area">
-    <textarea id="prompt" placeholder="Ask me anything..."></textarea>
-    <button id="send-btn">Send</button>
-  </div>
-
-</div>
-
-<script>
-  const API_URL = "http://localhost:9000/ai-teacher";
-
-  let history = [];
-  let currentWaveSurfer = null;
-
-  const messagesDiv = document.getElementById("messages");
-  const typingDiv = document.getElementById("typing");
-  const promptInput = document.getElementById("prompt");
-  const sendBtn = document.getElementById("send-btn");
-  const clearBtn = document.getElementById("clear-btn");
-  const themeToggle = document.getElementById("theme-toggle");
-  const voiceSelect = document.getElementById("voice-select");
-
-  // ========== Dark Mode ==========
-  themeToggle.onclick = () => {
-    document.body.classList.toggle("dark");
-    themeToggle.innerText =
-      document.body.classList.contains("dark") ? "☀️" : "🌙";
-  };
-
-  // ========== Clear Chat ==========
-  clearBtn.onclick = () => {
-    history = [];
-    messagesDiv.innerHTML = "";
-    if (currentWaveSurfer) currentWaveSurfer.destroy();
-    addBubble("👋 Chat cleared.\nStart a new question!", "bot");
-  };
-
-  // ========== Bubble ==========
-  function addBubble(text, sender) {
-    const bubble = document.createElement("div");
-    bubble.className = "bubble " + sender;
-
-    const textDiv = document.createElement("div");
-    textDiv.className = "bubble-text";
-    textDiv.innerText = text;
-    bubble.appendChild(textDiv);
-
-    messagesDiv.appendChild(bubble);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-
-    return { bubble, textDiv };
-  }
-
-  // ========== Typewriter ==========
-  function streamText(textDiv, fullText, speed = 18) {
-    let i = 0;
-    function tick() {
-      textDiv.innerText = fullText.slice(0, i);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-      i++;
-      if (i <= fullText.length) setTimeout(tick, speed);
-    }
-    tick();
-  }
-
-  // ========== WaveSurfer Player ==========
-  function attachWavePlayer(bubble, audioURL) {
-    const container = document.createElement("div");
-    container.className = "audio-player";
-
-    const waveformDiv = document.createElement("div");
-    waveformDiv.style.width = "100%";
-    waveformDiv.style.height = "60px";
-
-    const controlBtn = document.createElement("button");
-    controlBtn.className = "control-btn";
-    controlBtn.innerText = "⏸️ Stop";
-
-    container.appendChild(waveformDiv);
-    container.appendChild(controlBtn);
-    bubble.appendChild(container);
-
-    const wavesurfer = WaveSurfer.create({
-      container: waveformDiv,
-      waveColor: "#90caf9",
-      progressColor: "#007bff",
-      height: 60,
-      barWidth: 2,
-      barGap: 2,
-      autoScroll: true,
-      autoCenter: false,
-      responsive: true,
-    });
-
-    wavesurfer.load(audioURL);
-
-    // autoplay when ready
-    wavesurfer.on("ready", () => {
-      wavesurfer.play();
-    });
-
-    controlBtn.onclick = () => {
-      if (wavesurfer.isPlaying()) {
-        wavesurfer.pause();
-        controlBtn.innerText = "▶️ Continue";
-      } else {
-        wavesurfer.play();
-        controlBtn.innerText = "⏸️ Stop";
-      }
-    };
-
-    return wavesurfer;
-  }
-
-  // ========== Send Message ==========
-  async function sendMessage() {
-    const userText = promptInput.value.trim();
-    if (!userText) return;
-
-    addBubble(userText, "user");
-    promptInput.value = "";
-
-    history.push({ role: "user", text: userText });
-
-    const convoPrompt = history
-      .map(t => (t.role === "user" ? "Student: " : "Teacher: ") + t.text)
-      .join("\n");
-
-    typingDiv.style.display = "block";
-
-    const resp = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: convoPrompt,
-        with_audio: true,
-        voice: voiceSelect.value,
-      }),
-    });
-
-    const data = await resp.json();
-    typingDiv.style.display = "none";
-
-    history.push({ role: "assistant", text: data.text });
-
-    const { bubble, textDiv } = addBubble("", "bot");
-    streamText(textDiv, data.text);
-
-    if (data.audio_url) {
-      const url = "http://localhost:9000" + data.audio_url;
-
-      if (currentWaveSurfer) currentWaveSurfer.destroy();
-      currentWaveSurfer = attachWavePlayer(bubble, url);
-    }
-  }
-
-  sendBtn.onclick = sendMessage;
-
-  promptInput.onkeydown = e => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  // initial welcome
-  addBubble("👋 Hi! I’m your AI teacher.\nFeel free to ask me anything!", "bot");
-</script>
-
 </body>
 </html>
