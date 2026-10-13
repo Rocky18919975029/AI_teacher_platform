@@ -1,169 +1,181 @@
 # AI Teacher Platform
 
-A locally hosted teaching assistant with course-grounded answers, streamed text,
-traceable source passages and optional Piper speech synthesis. The original
-Qwen/vLLM + FastAPI classroom prototype now includes persistent course retrieval,
-access boundaries and operational controls.
+**English** | [简体中文](README.zh-CN.md)
 
-The capacity target is **at least 40 students using web chat and course retrieval
-concurrently**. One central API process defaults to 40 combined active chat/search
-requests and connects to a configurable inference replica pool on one or more LAN
-hosts. Student concurrency does not prescribe the number of GPUs or machines.
-The project does not claim high availability,
-security certification or measured production-scale capacity. GPU inference,
-real-course retrieval quality and deployment load still need to pass the
-[acceptance checklist](docs/operations.md#release-acceptance) on your host.
+AI Teacher Platform is a self-hosted AI teaching assistant that combines a large language model (LLM) with retrieval-augmented generation (RAG). Instructors upload course materials to build a course knowledge base, while students ask questions through a web interface and receive answers grounded in those materials, with source references.
 
-## Capabilities
+The platform uses **Qwen2.5**, **vLLM**, **FastAPI**, and **Qdrant**. It also supports general AI chat without course retrieval and optional text-to-speech.
 
-- **Retrieval:** instructor-uploaded PDF, DOCX, UTF-8 TXT and Markdown; bounded
-  extraction, token-aware overlapping chunks, Sentence Transformers embeddings,
-  persistent Qdrant cosine search, CrossEncoder reranking and bounded context.
-- **Evidence:** server-enforced course filtering; document IDs, titles and PDF pages
-  accompany retrieved passages. Answers use `[S1]` references; unknown or missing
-  citation IDs produce warnings. Empty retrieval returns insufficient evidence.
-- **Inference:** asynchronous OpenAI-compatible vLLM requests and real SSE token
-  streaming, response timeouts, bounded simultaneous chats and session serialization.
-- **Classroom concurrency:** retrieval microbatches up to eight questions with an
-  8 ms collection window, a dedicated bounded worker, course-isolated vector
-  queries, and a separately bounded two-job optional speech stage.
-- **State:** SQLite WAL sessions scoped to user and course, a durable upload queue
-  with bounded retries, idempotent document versions and source deletion.
-- **Access and operations:** scoped instructor/student keys, rate limits,
-  authenticated expiring audio, admin-only Prometheus metrics, health probes,
-  request IDs and a same-origin browser client without CDN scripts.
-- **Speech:** optional Piper subprocess synthesis with a timeout. Voice model and
-  CUDA runtime are deployment settings; the default container runs text/RAG only.
+## Features
 
-Retrieved content is untrusted reference data. Citation checks detect invalid
-references, not semantic correctness. Instructors must evaluate course answers.
-No model tool execution or autonomous external actions are enabled.
+- **AI tutoring:** Multi-turn conversations with real-time streamed responses, saved chat history, and the ability to start or stop a conversation.
+- **Course knowledge base:** Upload PDF, DOCX, UTF-8 TXT, and Markdown files; the platform extracts, indexes, and searches course content.
+- **Source-grounded answers:** Retrieve relevant passages and show document titles, source excerpts, and PDF page numbers when available. If no suitable material is found, the assistant indicates insufficient evidence.
+- **Course and user access:** Separate administrator and student keys, course-scoped access, and private conversation histories.
+- **Document management:** Administrators can upload, view, and delete course documents directly in the browser.
+- **Optional speech:** Read answers aloud using locally hosted Piper TTS (requires additional setup).
+- **Multi-user support:** Request limits and batched retrieval help manage classroom traffic.
 
-## Technology
+## Technical Highlights
 
-| Layer | Implementation |
+- **RAG pipeline:** Sentence Transformers embeddings → Qdrant vector search → CrossEncoder reranking → cited LLM responses.
+- **Responsive inference:** OpenAI-compatible vLLM integration, server-sent event (SSE) token streaming, and bounded concurrent requests.
+- **Local-first architecture:** Self-hosted inference and storage, persistent SQLite conversations, and per-course knowledge isolation.
+- **Operational readiness:** Durable document indexing jobs, health checks, access controls, and Prometheus metrics.
+
+## Tech Stack
+
+| Component | Technology |
 | --- | --- |
-| Serving | Python 3.12, FastAPI, Pydantic Settings, Uvicorn, HTTPX, SSE |
-| Inference | Qwen2.5-7B-Instruct/vLLM; configurable replica pool behind Nginx least-connections routing |
-| Retrieval | Sentence Transformers, BGE embeddings, CrossEncoder, Qdrant |
-| Documents | pypdf, python-docx; text-based PDFs, no built-in OCR |
-| Persistence | SQLite WAL and Qdrant persistent storage |
-| Browser | Same-origin JavaScript, incremental streaming, native audio |
-| Delivery | uv lockfile, non-root Docker image, Compose, GitHub Actions |
-| Observability | Prometheus counters/histograms, JSON request logs, health probes |
+| Language model | Qwen2.5-7B-Instruct |
+| LLM serving | vLLM |
+| Backend | Python 3.12, FastAPI |
+| Frontend | HTML, CSS, JavaScript |
+| Retrieval | Sentence Transformers, BGE embeddings, CrossEncoder |
+| Vector database | Qdrant |
+| Application data | SQLite |
+| Optional speech | Piper TTS |
+| Deployment | Docker Compose |
 
-## Student access
+## Quick Start
 
-Students open the institution-provided **HTTPS `/ui/` address**, enter their
-course-scoped key and course, and use the same chat interface. They do not need
-model/vector database addresses, backend configuration, terminal commands or
-software installation. All browser requests stay on that one origin; inference
-and storage services remain internal to the LAN.
+### 1. Prerequisites
 
-## Operator: run locally
+You will need:
 
-Use Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
-Start a separately managed vLLM endpoint and Qdrant server; weights, CUDA drivers
-and model licenses are not bundled here.
+- **Git**, **Python 3.12**, and [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- **Docker** with Docker Compose
+- A separately running **vLLM** service with access to the Qwen2.5-7B-Instruct model and suitable GPU resources
 
-```sh
-uv sync --locked --extra rag
+> Docker Compose starts the application and Qdrant. **It does not start vLLM.** Model weights and GPU drivers are not included in this repository.
+
+### 2. Clone the repository
+
+```bash
+git clone --branch codex/production-ai-teacher --single-branch \
+  https://github.com/Rocky18919975029/AI_teacher_platform.git
+cd AI_teacher_platform
+```
+
+### 3. Create your configuration
+
+```bash
 uv run python scripts/configure.py
 ```
 
-The setup script creates a private `.env` with independently generated keys and
-refuses to overwrite an existing file. Edit its service URLs and course mappings;
-give each person a stable, unique `subject` and only their authorized `courses`.
-`VLLM_URL` is the full chat-completions endpoint. Configure the generated Qdrant and
-inference keys on those services too. `.env.example` lists all settings.
+This creates a private `.env` file with separate administrator, student, vLLM, and Qdrant credentials. By default, it creates one administrator, one student, and a course named `metaverse`.
 
-```sh
+To generate credentials for more students **when creating a new `.env`**, run instead:
+
+```bash
+uv run python scripts/configure.py --students 40 --course-id metaverse
+```
+
+The script will not overwrite an existing `.env`. Find the generated administrator and student access tokens in its `API_KEYS` setting; distribute only the appropriate key to each user.
+
+### 4. Connect a vLLM server
+
+Start a vLLM server separately. For example, after installing vLLM and obtaining the model weights:
+
+```bash
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+  --host 0.0.0.0 --port 8000 \
+  --api-key "<VLLM_API_KEY_FROM_ENV>"
+```
+
+Edit `.env` so the application uses the correct endpoint and matching key:
+
+```dotenv
+VLLM_URL=http://<VLLM_HOST_IP>:8000/v1/chat/completions
+VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct
+VLLM_API_KEY=<SAME_KEY_USED_BY_VLLM>
+```
+
+**Important:** When the application runs in Docker, `VLLM_URL` must be reachable **from inside the container**. Do not use `127.0.0.1` unless vLLM actually runs in the same container. Keep the inference server on a trusted network.
+
+### 5. Start the platform
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+Check the API:
+
+```bash
+curl http://127.0.0.1:9000/health/live
+curl http://127.0.0.1:9000/health/ready
+```
+
+`/health/ready` checks connectivity to the dependent services. It may return `503` if Qdrant or vLLM is unavailable.
+
+Open the web interface:
+
+**http://127.0.0.1:9000/ui/**
+
+Enter a course ID (for example, `metaverse`) and its authorized access token, then select **Connect to classroom**.
+
+## How to Use
+
+### For instructors
+
+1. Sign in with an **administrator** token and the relevant course ID.
+2. Open **Course knowledge** in the sidebar.
+3. Choose a PDF, DOCX, TXT, or Markdown file and click **Upload & index**.
+4. Wait for indexing to complete. The material is now available for course-grounded questions.
+5. Use the same panel to view or delete documents.
+
+The default maximum upload size is **10 MB per file**. Scanned PDFs require OCR before uploading; OCR is not built in.
+
+### For students
+
+1. Open the classroom URL provided by the instructor.
+2. Enter the course ID and your personal access token.
+3. Ask a question in the chat box.
+4. Keep **Course grounding** enabled for answers based on uploaded materials, or disable it for general AI chat.
+5. Review the cited sources when shown. You can also open previous conversations, start a new one, or stop a response.
+
+Students only need a browser; they do not need to install the model or database.
+
+## Configuration and Optional Features
+
+Common settings are defined in `.env`:
+
+| Setting | Purpose |
+| --- | --- |
+| `API_KEYS` | Users, roles, credentials, and authorized courses |
+| `VLLM_URL`, `VLLM_MODEL`, `VLLM_API_KEY` | LLM endpoint, model, and authentication |
+| `QDRANT_API_KEY` | Vector database authentication |
+| `MAX_CONCURRENT_CHATS` | Maximum active chat/search requests (default: `40`) |
+| `MAX_UPLOAD_BYTES` | Per-file upload limit |
+| `TTS_ENABLED` | Enable optional Piper speech synthesis |
+
+The default `40` is a **request admission limit**, not a verified 40-student performance benchmark. Actual capacity depends on your hardware and workload.
+
+For optional speech, install the TTS dependencies, provide a Piper executable and voice model, and set `TTS_ENABLED=true`. See the [operations guide](docs/operations.md#optional-speech). The default Docker image does not include Piper.
+
+To run the backend directly for local development (with vLLM and Qdrant already available):
+
+```bash
+uv sync --locked --extra rag
 uv run uvicorn app:app --host 127.0.0.1 --port 9000 --workers 1 --no-access-log
 ```
 
-Open [http://127.0.0.1:9000/ui/](http://127.0.0.1:9000/ui/), supply your key and course.
-FastAPI serves the interface; no separate frontend server is required. Browser keys
-remain in memory, not URLs or local storage.
+## API and Documentation
 
-The first RAG request loads the embedding/reranking models. Pin their revision
-hashes and warm them before admitting students. English defaults need replacement
-and evaluation for predominantly Chinese or multilingual courses. Downloads need
-internet initially; local inference can operate after weights are provisioned.
+The browser uses the same HTTP API that other clients can integrate with. API requests require `Authorization: Bearer <access-token>`.
 
-## Operator: container deployment
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/chat/stream` | Stream an AI response |
+| `POST /api/search` | Search course content |
+| `POST /api/documents?course_id=...` | Upload a document (administrator) |
+| `GET /api/documents?course_id=...` | List course documents |
+| `GET /api/sessions?course_id=...` | List conversation history |
+| `GET /health/ready` | Check service readiness |
 
-Set `.env` service URLs, including a `VLLM_URL` reachable **from the container**.
-Container `127.0.0.1` is not the inference host. Then:
+- [API reference](docs/api.md)
+- [Deployment and operations](docs/operations.md)
+- [Multi-user deployment](docs/cluster40.md)
 
-```sh
-docker compose up --build -d
-curl --fail http://127.0.0.1:9000/health/live
-curl --fail http://127.0.0.1:9000/health/ready
-```
-
-Compose starts the API and authenticated Qdrant. Qdrant has no published port; the
-API binds to loopback. Put a TLS reverse proxy in front for remote users. Data and
-model caches use named volumes. One API worker is required by local job coordination
-and process-local rate/admission limits. See [operations](docs/operations.md).
-
-For the concurrent-student target, use the [capacity/deployment runbook](docs/cluster40.md).
-It accepts the actual replica inventory, including several selected GPUs on one
-host or replicas on multiple hosts, and generates the central gateway configuration.
-The runbook includes all-replica health probing and a real-service load procedure.
-Increase `MAX_CONCURRENT_CHATS` above 40 only with corresponding hardware/workload
-validation. Generating configuration does not deploy services or certify capacity.
-
-## Upload and evaluate
-
-Set `TEACHER_API_KEY` through your secret manager or a hidden shell prompt. Use an
-instructor key for upload and a course-scoped key for retrieval evaluation.
-
-```sh
-uv run python scripts/ingest.py course-notes.pdf --course metaverse
-uv run python scripts/evaluate_retrieval.py labeled-questions.jsonl --k 5 --minimum-recall 0.8
-```
-
-The upload command waits for a durable job and returns a document ID. Label a JSONL
-evaluation set with IDs from your deployment:
-
-```json
-{"course_id":"metaverse","query":"How are virtual classroom interactions represented?","relevant_document_ids":["REPLACE_WITH_INGESTED_DOCUMENT_UUID"]}
-```
-
-Evaluation measures document recall, first-relevant reciprocal rank, hit rate and
-request latency over the first `k` returned chunks. `--minimum-recall` is a chosen
-gate, not a claimed score. Set server `RAG_TOP_K >= k`; there is no per-query override.
-This does not measure answer faithfulness or establish an SLA. See [API contracts](docs/api.md).
-
-## Development and validation
-
-```sh
-uv sync --locked
-uv run ruff check .
-uv run python -m pytest -q
-uv run pip-audit --strict --progress-spinner off
-```
-
-Tests use deterministic inference/embedding doubles and isolated stores, including
-local Qdrant integration. They do not require model downloads or a GPU. Install
-`--extra rag` for real model execution. CI runs lint/tests, dependency auditing and
-a container build. Real GPU/model and target-host load acceptance remains separate.
-The [validation record](docs/validation.md) separates completed checks from pending
-deployment acceptance.
-
-For an explicit real embedding/reranker smoke test (downloads weights if uncached):
-
-```sh
-RUN_MODEL_SMOKE=1 uv run --locked --extra rag python -m pytest -q tests/test_rag.py -m integration
-```
-
-This checks actual model retrieval, course scoping and local Qdrant persistence;
-it is not a remote Qdrant/vLLM integration or a course-quality benchmark.
-
-`teacher/` contains configuration, API, state, inference and retrieval modules;
-`frontend/` is the browser client; `scripts/` provides operational tools; `docs/`
-contains API and deployment instructions.
-
-The `/ai-teacher` JSON route remains but requires authentication and a course ID.
-Use `rag: false` for general conversation. Shared demo history is not migrated and
-audio is no longer public. Review [migration notes](docs/operations.md#migration-and-rollbacks).
+**Deployment notes:** Keep `.env` out of version control. For access from other devices, use an HTTPS reverse proxy; the default Docker setup binds the application to local loopback. AI answers can be incorrect, so verify important information against the original course materials.
