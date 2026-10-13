@@ -1,4 +1,4 @@
-"""Render the 40-replica gateway bundle from explicit private-network inventory."""
+"""Render a gateway bundle from a flexible private-network inference replica inventory."""
 
 import argparse
 import sys

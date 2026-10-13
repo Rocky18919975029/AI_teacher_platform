@@ -5,9 +5,11 @@ traceable source passages and optional Piper speech synthesis. The original
 Qwen/vLLM + FastAPI classroom prototype now includes persistent course retrieval,
 access boundaries and operational controls.
 
-The application uses **one central API process**, with an optional deployment
-bundle for **40 independent RTX 4090 inference hosts**. Its default admission cap
-is 40 combined active chats/searches. It does not claim high availability,
+The capacity target is **at least 40 students using web chat and course retrieval
+concurrently**. One central API process defaults to 40 combined active chat/search
+requests and connects to a configurable inference replica pool on one or more LAN
+hosts. Student concurrency does not prescribe the number of GPUs or machines.
+The project does not claim high availability,
 security certification or measured production-scale capacity. GPU inference,
 real-course retrieval quality and deployment load still need to pass the
 [acceptance checklist](docs/operations.md#release-acceptance) on your host.
@@ -42,7 +44,7 @@ No model tool execution or autonomous external actions are enabled.
 | Layer | Implementation |
 | --- | --- |
 | Serving | Python 3.12, FastAPI, Pydantic Settings, Uvicorn, HTTPX, SSE |
-| Inference | Qwen2.5-7B-Instruct/vLLM; optional 40 replicas behind Nginx least-connections routing |
+| Inference | Qwen2.5-7B-Instruct/vLLM; configurable replica pool behind Nginx least-connections routing |
 | Retrieval | Sentence Transformers, BGE embeddings, CrossEncoder, Qdrant |
 | Documents | pypdf, python-docx; text-based PDFs, no built-in OCR |
 | Persistence | SQLite WAL and Qdrant persistent storage |
@@ -50,7 +52,15 @@ No model tool execution or autonomous external actions are enabled.
 | Delivery | uv lockfile, non-root Docker image, Compose, GitHub Actions |
 | Observability | Prometheus counters/histograms, JSON request logs, health probes |
 
-## Run locally
+## Student access
+
+Students open the institution-provided **HTTPS `/ui/` address**, enter their
+course-scoped key and course, and use the same chat interface. They do not need
+model/vector database addresses, backend configuration, terminal commands or
+software installation. All browser requests stay on that one origin; inference
+and storage services remain internal to the LAN.
+
+## Operator: run locally
 
 Use Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 Start a separately managed vLLM endpoint and Qdrant server; weights, CUDA drivers
@@ -80,7 +90,7 @@ hashes and warm them before admitting students. English defaults need replacemen
 and evaluation for predominantly Chinese or multilingual courses. Downloads need
 internet initially; local inference can operate after weights are provisioned.
 
-## Container deployment
+## Operator: container deployment
 
 Set `.env` service URLs, including a `VLLM_URL` reachable **from the container**.
 Container `127.0.0.1` is not the inference host. Then:
@@ -96,10 +106,12 @@ API binds to loopback. Put a TLS reverse proxy in front for remote users. Data a
 model caches use named volumes. One API worker is required by local job coordination
 and process-local rate/admission limits. See [operations](docs/operations.md).
 
-For the 40-machine deployment, use the [cluster runbook](docs/cluster40.md),
-`deploy/compose.inference-node.yaml` on each GPU host and the generated central
-gateway configuration. It includes fleet-wide health probing and a load-test
-procedure; no GPU deployment is performed by generating configuration.
+For the concurrent-student target, use the [capacity/deployment runbook](docs/cluster40.md).
+It accepts the actual replica inventory, including several selected GPUs on one
+host or replicas on multiple hosts, and generates the central gateway configuration.
+The runbook includes all-replica health probing and a real-service load procedure.
+Increase `MAX_CONCURRENT_CHATS` above 40 only with corresponding hardware/workload
+validation. Generating configuration does not deploy services or certify capacity.
 
 ## Upload and evaluate
 

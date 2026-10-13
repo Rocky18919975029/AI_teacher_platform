@@ -1,4 +1,7 @@
-"""Validate a fixed replica inventory and render a secret-free gateway bundle."""
+"""Validate an operator-sized replica pool and render a secret-free gateway bundle.
+
+Replica/GPU count is independent of the classroom's concurrent-user target.
+"""
 
 import ipaddress
 import json
@@ -8,18 +11,29 @@ from urllib.parse import urlsplit
 
 NAME = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$')
 DNS = re.compile(r'^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$')
+GPU_DEVICE = re.compile(
+    r'(?:0|[1-9][0-9]*|GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+    re.IGNORECASE,
+)
 
 
-def load_inventory(value, expected_nodes=40):
+def load_inventory(value):
     if not isinstance(value, dict) or set(value) != {'nodes'}:
         raise ValueError('Inventory must be an object containing only a nodes array')
     nodes = value['nodes']
-    if not isinstance(nodes, list) or len(nodes) != expected_nodes:
-        raise ValueError(f'Inventory must contain exactly {expected_nodes} replica nodes')
-    result, names, addresses = [], set(), set()
+    if not isinstance(nodes, list) or not nodes:
+        raise ValueError('Inventory must contain at least one inference replica')
+    result, names, addresses, devices = [], set(), set(), set()
     for node in nodes:
-        if not isinstance(node, dict) or not {'name', 'url'} <= set(node) <= {'name', 'url', 'bind_host'}:
-            raise ValueError('Each node requires name and url; only optional bind_host is supported')
+        if not isinstance(node, dict) or not {'name', 'url'} <= set(node) <= {
+            'name',
+            'url',
+            'bind_host',
+            'gpu_device',
+        }:
+            raise ValueError(
+                'Each replica requires name and url; optional bind_host and gpu_device are supported'
+            )
         name, url = node['name'], node['url']
         if not isinstance(name, str) or not NAME.fullmatch(name) or name.lower() in names:
             raise ValueError('Node names must be unique, simple identifiers of up to 32 characters')
@@ -56,12 +70,21 @@ def load_inventory(value, expected_nodes=40):
             host = str(address)
             default_bind = host
         bind = str(ipaddress.ip_address(node.get('bind_host', default_bind)))
+        gpu_device = node.get('gpu_device', '0')
+        if not isinstance(gpu_device, str) or not GPU_DEVICE.fullmatch(gpu_device):
+            raise ValueError('gpu_device must be a decimal device index or a full GPU UUID string')
+        if gpu_device.lower().startswith('gpu-'):
+            gpu_device = 'GPU-' + gpu_device[4:].lower()
         target = f'[{host}]:{port}' if ':' in host else f'{host.lower()}:{port}'
         if target in addresses:
             raise ValueError('Replica endpoints must be unique')
+        device = (host.lower(), gpu_device)
+        if device in devices:
+            raise ValueError('Replicas on the same host must use distinct GPU devices')
         names.add(name.lower())
         addresses.add(target)
-        result.append({'name': name, 'url': f'http://{target}', 'bind_host': bind})
+        devices.add(device)
+        result.append({'name': name, 'url': f'http://{target}', 'bind_host': bind, 'gpu_device': gpu_device})
     return result
 
 
@@ -137,7 +160,9 @@ def generate_bundle(inventory: Path, output: Path):
             '# Non-secret node settings; supply VLLM_API_KEY separately on the node.\n'
             f'# Gateway reaches this node at {node["url"]}.\n'
             '# DNS inventories default to loopback binding: set the private interface IP before rollout.\n'
+            f'COMPOSE_PROJECT_NAME=teacher-{node["name"].lower()}\n'
             f'VLLM_BIND_HOST={bind_host}\nVLLM_PORT={port}\n'
+            f'VLLM_GPU_DEVICE={node["gpu_device"]}\n'
             'VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct\nVLLM_MAX_MODEL_LEN=16384\n'
             'VLLM_MAX_NUM_SEQS=4\nVLLM_GPU_MEMORY_UTILIZATION=0.88\n',
             encoding='utf-8',

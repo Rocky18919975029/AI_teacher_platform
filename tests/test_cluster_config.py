@@ -9,14 +9,16 @@ from deploy.cluster import generate_bundle, load_inventory, render_nginx
 from deploy.fleet_health import FleetState, probe_node
 
 
-def inventory():
-    return {'nodes': [{'name': f'gpu{i:02}', 'url': f'http://10.23.0.{i}:8000'} for i in range(1, 41)]}
+def inventory(count=40):
+    return {'nodes': [{'name': f'gpu{i:02}', 'url': f'http://10.23.0.{i}:8000'} for i in range(1, count + 1)]}
 
 
-def test_render_forty_distinct_replicas_with_stream_safe_failover():
-    nodes = load_inventory(inventory())
+@pytest.mark.parametrize('count', [1, 2, 8, 40, 64])
+def test_render_any_nonempty_replica_count_with_stream_safe_failover(count):
+    nodes = load_inventory(inventory(count))
     config = render_nginx(nodes)
-    assert config.count('max_fails=2 fail_timeout=10s;') == 40
+    assert len(nodes) == count
+    assert config.count('max_fails=2 fail_timeout=10s;') == count
     assert 'least_conn;' in config and 'zone inference_fleet' in config
     assert 'proxy_buffering off;' in config and 'proxy_ignore_client_abort off;' in config
     assert 'proxy_next_upstream error timeout http_502 http_503 http_504;' in config
@@ -52,7 +54,7 @@ def test_reject_unsafe_node_urls(bad_url):
 def test_count_duplicates_and_dns_binding():
     data = inventory()
     with pytest.raises(ValueError):
-        load_inventory({'nodes': data['nodes'][:-1]})
+        load_inventory({'nodes': []})
     data['nodes'][1]['url'] = data['nodes'][0]['url']
     with pytest.raises(ValueError):
         load_inventory(data)
@@ -78,6 +80,133 @@ def test_generator_never_overwrites_and_contains_no_credentials(tmp_path):
     assert (output / 'nginx.conf').read_text() == original
     assert 'VLLM_API_KEY=' not in ''.join(p.read_text() for p in output.glob('*'))
     assert 'VLLM_BIND_HOST=10.23.0.1' in (output / 'gpu01.env').read_text()
+    assert 'VLLM_GPU_DEVICE=0\n' in (output / 'gpu01.env').read_text()
+    assert 'COMPOSE_PROJECT_NAME=teacher-gpu01\n' in (output / 'gpu01.env').read_text()
+
+
+def test_two_gpus_on_one_host_get_distinct_devices_ports_and_compose_projects(tmp_path):
+    data = {
+        'nodes': [
+            {'name': 'GPU-A', 'url': 'http://10.23.0.1:8000', 'gpu_device': '0'},
+            {'name': 'GPU-B', 'url': 'http://10.23.0.1:8001', 'gpu_device': '1'},
+        ]
+    }
+    nodes = load_inventory(data)
+    assert [node['gpu_device'] for node in nodes] == ['0', '1']
+    assert len({node['url'] for node in nodes}) == 2
+    source, output = tmp_path / 'nodes.json', tmp_path / 'bundle'
+    source.write_text(json.dumps(data))
+    assert generate_bundle(source, output) == 2
+    first = (output / 'GPU-A.env').read_text()
+    second = (output / 'GPU-B.env').read_text()
+    assert 'VLLM_GPU_DEVICE=0\n' in first and 'VLLM_GPU_DEVICE=1\n' in second
+    assert 'VLLM_PORT=8000\n' in first and 'VLLM_PORT=8001\n' in second
+    assert 'COMPOSE_PROJECT_NAME=teacher-gpu-a\n' in first
+    assert 'COMPOSE_PROJECT_NAME=teacher-gpu-b\n' in second
+    assert load_inventory(json.loads((output / 'nodes.json').read_text())) == nodes
+
+
+def test_omitted_gpu_device_defaults_to_zero_and_is_valid_on_distinct_hosts():
+    nodes = load_inventory(inventory(2))
+    assert [node['gpu_device'] for node in nodes] == ['0', '0']
+
+
+@pytest.mark.parametrize('device', ['0', '1', '12'])
+def test_canonical_decimal_gpu_indices_are_accepted(device):
+    data = inventory(1)
+    data['nodes'][0]['gpu_device'] = device
+    assert load_inventory(data)[0]['gpu_device'] == device
+
+
+@pytest.mark.parametrize(
+    'device',
+    [
+        '',
+        '00',
+        '01',
+        '+1',
+        '-1',
+        '0.0',
+        '0,1',
+        'all',
+        'none',
+        'GPU-short',
+        'MIG-12345678-1234-1234-1234-123456789abc',
+        '0\nVLLM_API_KEY=injected',
+        '$(command)',
+        '${INJECT}',
+        ' 0',
+        '0 ',
+        0,
+        1,
+        None,
+        True,
+        [],
+        {},
+    ],
+)
+def test_reject_invalid_or_injected_gpu_selectors(device):
+    data = inventory(1)
+    data['nodes'][0]['gpu_device'] = device
+    with pytest.raises(ValueError):
+        load_inventory(data)
+
+
+@pytest.mark.parametrize(
+    'first_url,second_url',
+    [
+        ('http://gpu.example:8000', 'http://GPU.EXAMPLE:8001'),
+        ('http://10.23.0.1:8000', 'http://10.23.0.1:8001'),
+        ('http://[fd00::1]:8000', 'http://[fd00:0:0:0:0:0:0:1]:8001'),
+    ],
+)
+def test_same_normalized_host_and_gpu_rejected_even_with_different_ports(first_url, second_url):
+    with pytest.raises(ValueError):
+        load_inventory(
+            {
+                'nodes': [
+                    {'name': 'first', 'url': first_url},
+                    {'name': 'second', 'url': second_url, 'gpu_device': '0'},
+                ]
+            }
+        )
+
+
+def test_distinct_devices_still_require_distinct_endpoints():
+    with pytest.raises(ValueError):
+        load_inventory(
+            {
+                'nodes': [
+                    {'name': 'first', 'url': 'http://10.23.0.1:8000', 'gpu_device': '0'},
+                    {'name': 'second', 'url': 'http://10.23.0.1:8000', 'gpu_device': '1'},
+                ]
+            }
+        )
+
+
+def test_full_gpu_uuid_supported_and_written_to_environment(tmp_path):
+    device = 'GPU-12345678-abcd-1234-abcd-123456789abc'
+    data = inventory(1)
+    data['nodes'][0]['gpu_device'] = device
+    nodes = load_inventory(data)
+    assert nodes[0]['gpu_device'].lower() == device.lower()
+    source, output = tmp_path / 'nodes.json', tmp_path / 'bundle'
+    source.write_text(json.dumps(data))
+    assert generate_bundle(source, output) == 1
+    assert f'VLLM_GPU_DEVICE={nodes[0]["gpu_device"]}\n' in (output / 'gpu01.env').read_text()
+
+
+def test_uuid_case_does_not_bypass_duplicate_gpu_detection():
+    uuid = '12345678-abcd-1234-abcd-123456789abc'
+    with pytest.raises(ValueError):
+        load_inventory(
+            {
+                'nodes': [
+                    {'name': 'first', 'url': 'http://10.23.0.1:8000', 'gpu_device': f'GPU-{uuid}'},
+                    {'name': 'second', 'url': 'http://10.23.0.1:8001', 'gpu_device': f'GPU-{uuid.upper()}'},
+                ]
+            }
+        )
 
 
 def test_ipv6_uses_brackets_only_for_upstream_not_compose_host_ip(tmp_path):

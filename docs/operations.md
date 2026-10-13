@@ -3,7 +3,7 @@
 ## Supported topology
 
 Run **one FastAPI/Uvicorn process**, persistent Qdrant and separately provisioned
-vLLM inference (one service or the [40-replica gateway](cluster40.md)). SQLite WAL stores sessions/jobs/audio metadata at
+vLLM inference (one service or a [configurable replica pool](cluster40.md)). SQLite WAL stores sessions/jobs/audio metadata at
 `DATA_DIR/teacher.sqlite3`; uploads/audio share that data directory. Qdrant stores
 passage text, embeddings and document metadata. This release is not an HA cluster.
 
@@ -12,6 +12,12 @@ and cache volumes, bounded temporary storage and resource limits. Qdrant has an
 API key, internal network and no published host port. Provision vLLM's GPU, model
 weights/license and context limit separately. Do not use additional API workers:
 rate/admission limits and job coordination assume one process.
+
+The requirement is at least 40 simultaneous student web chat/RAG interactions,
+not a fixed machine or GPU count. Choose replicas from the actual LAN inventory;
+they may run on one multi-GPU host or multiple hosts. GPU devices and serving ports
+are explicit per replica. Replicas sharing a host use distinct devices and Compose
+project names. All configured replicas must pass gateway readiness checks.
 
 Embedding/reranking default to CPU; Linux installs use the official CPU PyTorch
 index, keeping the API image separate from GPU vLLM serving. To use CUDA for RAG,
@@ -46,6 +52,10 @@ multipart overhead. Enforce connection and slow-client limits at the proxy. Do n
 cache authenticated API/audio responses. Trust forwarded headers only from known
 proxies. Serve `/ui/` and `/api/` on the same origin.
 
+Distribute one public HTTPS `/ui/` address and course-scoped credentials to students.
+Keep backend, inference and vector-store endpoints as operator configuration;
+students interact entirely through the browser and need no deployment commands.
+
 The browser renders responses as text with no runtime CDN script. Keep that property
 when extending it; never insert model text as raw HTML. Tune concurrency, per-key
 rate limits, queue caps and upload bounds against real hardware. The combined
@@ -54,6 +64,9 @@ window. Retrieval token counts use the embedding tokenizer, not necessarily the
 generation tokenizer, so budget conservatively.
 
 Default `MAX_CONCURRENT_CHATS=40` is the combined active chat/search admission cap.
+It is a 40-request capacity baseline, not a limit on registered accounts or open
+browser tabs and not a one-GPU-per-student mapping. For higher simultaneous demand,
+raise the setting only after testing the full pipeline with the intended workload.
 The upstream connection pool scales with that cap. Retrieval uses
 `RETRIEVAL_BATCH_SIZE=8`, `RETRIEVAL_BATCH_WAIT_MS=8` and `RETRIEVAL_TIMEOUT=60` with
 a bounded dedicated worker, not the generic web thread pool. Query embeddings and
@@ -167,7 +180,7 @@ These are target-deployment gates, not claimed results from the development mach
 - Fail/restart dependencies and restore backups. Assign operating owners, alerts,
   incident contacts and data-retention procedures.
 
-For replicas/HA, first move queue/rate-limit coordination to shared infrastructure,
+For multiple **central API** replicas/HA, first move queue/rate-limit coordination to shared infrastructure,
 replace SQLite where needed, externalize files, implement schema migrations and
 validate failure modes. More Uvicorn workers alone is unsupported.
 

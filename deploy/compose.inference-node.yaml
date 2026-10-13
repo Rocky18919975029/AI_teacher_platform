@@ -1,4 +1,5 @@
-# Run once on each RTX 4090 host. This is an independent replica, not a TP rank.
+# Run once per selected GPU with a distinct project, port and device ID.
+# Multiple replicas may share a physical host; GPU count is not user count.
 services:
   vllm:
     image: vllm/vllm-openai:v0.31.0-cu129
@@ -44,7 +45,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${VLLM_GPU_DEVICE:?Set the host GPU index or UUID for this replica}"]
               capabilities: [gpu]
     stop_grace_period: 120s
 

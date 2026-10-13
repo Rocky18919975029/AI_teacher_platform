@@ -5,7 +5,7 @@ to the checked source, not to an already deployed classroom instance.
 
 | Check | Observed result | Scope |
 | --- | --- | --- |
-| Python regression suite | 113 passed, 1 skipped | API authorization/course isolation, 40-request scheduling and transport, session/stream cancellation and exact permit cleanup, persistent local Qdrant retrieval, document limits/queue recovery, cluster configuration/probes and load-tool behavior using deterministic model doubles |
+| Python regression suite | 150 passed, 1 skipped | API authorization/course isolation, 40-request scheduling and transport, session/stream cancellation and exact permit cleanup, persistent local Qdrant retrieval, document limits/queue recovery, configurable replica/GPU inventory, cluster probes and load-tool behavior using deterministic model doubles |
 | Frontend protocol suite | 6 passed | SSE framing/UTF-8/CRLF/EOF, malformed data, cancellation, same-origin authenticated URLs and document ID mapping |
 | Browser smoke | Passed | Authentication, send, streamed response, sources and saved conversation with a fake inference backend |
 | Python lint | Passed | Ruff checks of repository source and operational scripts |
@@ -30,25 +30,31 @@ by this upgrade. Docker was unavailable on the development host, so image build
 and Compose startup need the CI/container host. The [operations acceptance gates](operations.md#release-acceptance)
 cover these remaining checks, backup restoration and institutional deployment.
 
-## Forty-user application and forty-host deployment profile
+## Forty-user application baseline and configurable deployment
 
 The new profile adds tests for 40 simultaneous fake inference streams, mixed
 chat/search admission, exact cancellation/permit cleanup, 40 real TCP connections
 to a deterministic upstream and five eight-query retrieval batches. These verify
 application scheduling and transport behavior using controlled dependencies;
-they do not measure forty RTX 4090s or a real model's tokens per second.
+they do not measure real-model throughput or establish a required GPU/machine count.
 
-Cluster tooling checks validate exactly forty unique endpoints, reject credentials
-and configuration injection in inventory, preserve existing output directories,
-render stream-safe proxy settings, and verify stale/failing/wrong-key/wrong-model
-fleet readiness. Probes expose aggregate counts only. The node and gateway Compose
+Cluster configuration accepts a nonempty replica inventory independently of student
+count. Replicas can share a host with distinct ports and GPU devices, and generated
+Compose project names separate their deployments. Inventory validation rejects
+credentials and configuration injection, and generation preserves existing output
+directories. Readiness requires all configured replicas and reports aggregate counts
+only; stale or failed probes do not indicate readiness. The node and gateway Compose
 files have been parsed as YAML; generated Nginx and GPU container runtime acceptance
 still require a Docker/NVIDIA target host.
 
-The [cluster runbook](cluster40.md) supplies a real-service load procedure with
+The [capacity/deployment runbook](cluster40.md) supplies a real-service load procedure with
 distinct student identities and explicit latency gates. No successful real-model
 40-user acceptance report is included. Add measured results only after deployment,
 including hardware, model revisions, prompt/output sizes and the actual workload.
+Two-replica topology examples are not evidence that two GPUs can serve the target.
+The pending acceptance criterion is at least 40 simultaneous student browser
+chat/RAG interactions through one HTTPS interface; no latency guarantee or actual
+LAN deployment is asserted here.
 
 CI audits upstream PyTorch advisories for its official CPU wheel version after
 normalizing the `+cpu` suffix in an audit-only manifest. Lockfile package versions
